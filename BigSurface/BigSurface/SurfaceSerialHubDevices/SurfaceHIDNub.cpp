@@ -75,7 +75,6 @@ IOReturn SurfaceHIDNub::message(UInt32 type, IOService *provider, void *argument
     switch (type) {
         case kIOMessageSystemWillPowerOff:
         case kIOMessageSystemWillRestart:
-        case kIOMessageSystemWillShutdown:
             shutdown = true;
             disableEvents();
             break;

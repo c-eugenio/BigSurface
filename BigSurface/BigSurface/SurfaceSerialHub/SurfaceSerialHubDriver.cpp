@@ -667,7 +667,6 @@ IOReturn SurfaceSerialHubDriver::message(UInt32 type, IOService *provider, void 
     switch (type) {
         case kIOMessageSystemWillPowerOff:
         case kIOMessageSystemWillRestart:
-        case kIOMessageSystemWillShutdown:
             shutdown = true;
             disableEvents();
             break;
