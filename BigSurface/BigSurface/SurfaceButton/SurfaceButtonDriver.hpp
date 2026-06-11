@@ -9,6 +9,7 @@
 #ifndef SurfaceButtonDriver_hpp
 #define SurfaceButtonDriver_hpp
 
+#include <IOKit/IOMessage.h>
 #include <IOKit/acpi/IOACPIPlatformDevice.h>
 
 #include "../../../Dependencies/VoodooGPIO/VoodooGPIO/VoodooGPIO.hpp"
@@ -38,6 +39,10 @@ private:
     
     bool    is_interrupt_started[BTN_CNT] = {false, false, false};
     bool    btn_status[BTN_CNT] = {false, false, false};
+    bool    started {false};
+    bool    terminating {false};
+    bool    shutdown {false};
+    bool    events_enabled {false};
     int     gpio_irq[BTN_CNT] = {0,0,0};
     UInt16  gpio_pin[BTN_CNT] = {0,0,0};
     bool    awake {false};    
@@ -61,6 +66,10 @@ private:
     void volumeDownInterruptOccured(IOInterruptEventSource* src, int intCount);
     
     void response(int btn_idx, bool status);
+
+    bool canDispatchEvents() const;
+
+    void disableEvents();
     
 public:
     IOReturn enableInterrupt(int source) override;
@@ -78,6 +87,10 @@ public:
     bool start(IOService* provider) override;
     
     void stop(IOService* provider) override;
+
+    bool willTerminate(IOService *provider, IOOptionBits options) override;
+
+    IOReturn message(UInt32 type, IOService *provider, void *argument) override;
     
     IOReturn setPowerState(unsigned long whichState, IOService *whatDevice) override;
 };

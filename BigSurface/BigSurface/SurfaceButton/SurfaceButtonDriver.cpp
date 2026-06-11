@@ -83,22 +83,28 @@ IOReturn SurfaceButtonDriver::getDeviceResources() {
 }
 
 void SurfaceButtonDriver::powerInterruptOccured(IOInterruptEventSource* src, int intCount) {
+    if (!canDispatchEvents())
+        return;
     response(POWER_BUTTON_IDX, intCount % 2);
 }
 
 void SurfaceButtonDriver::volumeUpInterruptOccured(IOInterruptEventSource* src, int intCount) {
-    if (!awake)
+    if (!awake || !canDispatchEvents())
         return;
     stopInterrupt(VOLUME_DOWN_BUTTON_IDX);
+    if (!gpio_controller)
+        return;
     bool button_status = gpio_controller->getPinStatus(gpio_pin[VOLUME_UP_BUTTON_IDX]);
     response(VOLUME_UP_BUTTON_IDX, button_status);
     startInterrupt(VOLUME_DOWN_BUTTON_IDX);
 }
 
 void SurfaceButtonDriver::volumeDownInterruptOccured(IOInterruptEventSource* src, int intCount) {
-    if (!awake)
+    if (!awake || !canDispatchEvents())
         return;
     stopInterrupt(VOLUME_UP_BUTTON_IDX);
+    if (!gpio_controller)
+        return;
     bool button_status = gpio_controller->getPinStatus(gpio_pin[VOLUME_DOWN_BUTTON_IDX]);
     response(VOLUME_DOWN_BUTTON_IDX, button_status);
     startInterrupt(VOLUME_UP_BUTTON_IDX);
@@ -106,6 +112,8 @@ void SurfaceButtonDriver::volumeDownInterruptOccured(IOInterruptEventSource* src
 
 void SurfaceButtonDriver::response(int btn_idx, bool status) {
     if (btn_idx >= BTN_CNT)
+        return;
+    if (!canDispatchEvents() || !button_device)
         return;
     
     if (btn_idx == POWER_BUTTON_IDX) {
@@ -116,6 +124,19 @@ void SurfaceButtonDriver::response(int btn_idx, bool status) {
         btn_status[btn_idx] = status;
     DBG_LOG("%s %s!", BTN_DESCRIPTION[btn_idx], btn_status[btn_idx]?"pressed":"released");
     button_device->simulateKeyboardEvent(BTN_CMD_PAGE[btn_idx], BTN_CMD[btn_idx], btn_status[btn_idx]);
+}
+
+bool SurfaceButtonDriver::canDispatchEvents() const {
+    return started && !terminating && !shutdown && events_enabled;
+}
+
+void SurfaceButtonDriver::disableEvents() {
+    events_enabled = false;
+    awake = false;
+    if (button_device)
+        button_device->setEventsEnabled(false);
+    for (int i = 0; i < BTN_CNT; i++)
+        stopInterrupt(i);
 }
 
 IOService *SurfaceButtonDriver::probe(IOService *provider, SInt32 *score){
@@ -148,6 +169,10 @@ bool SurfaceButtonDriver::start(IOService *provider) {
     if (!super::start(provider))
         return false;
 
+    terminating = false;
+    shutdown = false;
+    events_enabled = false;
+
     work_loop = IOWorkLoop::workLoop();
     if (!work_loop) {
         LOG("Could not get work loop");
@@ -173,17 +198,44 @@ bool SurfaceButtonDriver::start(IOService *provider) {
     PMinit();
     acpi_device->joinPMtree(this);
     registerPowerDriver(this, myIOPMPowerStates, kIOPMNumberPowerStates);
-    
+
+    started = true;
+    events_enabled = true;
     return true;
 exit:
+    terminating = true;
+    events_enabled = false;
     releaseResources();
     return false;
 }
 
 void SurfaceButtonDriver::stop(IOService *provider) {
+    terminating = true;
+    disableEvents();
     PMstop();
     releaseResources();
+    started = false;
     super::stop(provider);
+}
+
+bool SurfaceButtonDriver::willTerminate(IOService *provider, IOOptionBits options) {
+    terminating = true;
+    disableEvents();
+    return super::willTerminate(provider, options);
+}
+
+IOReturn SurfaceButtonDriver::message(UInt32 type, IOService *provider, void *argument) {
+    switch (type) {
+        case kIOMessageSystemWillPowerOff:
+        case kIOMessageSystemWillRestart:
+        case kIOMessageSystemWillShutdown:
+            shutdown = true;
+            disableEvents();
+            break;
+        default:
+            break;
+    }
+    return super::message(type, provider, argument);
 }
 
 IOReturn SurfaceButtonDriver::setPowerState(unsigned long whichState, IOService *whatDevice) {
@@ -198,7 +250,7 @@ IOReturn SurfaceButtonDriver::setPowerState(unsigned long whichState, IOService 
             awake = false;
         }
     } else {
-        if (!awake) {
+        if (!awake && !terminating && !shutdown) {
             awake = true;
             IOSleep(100);   // Wait for SSH to notify d0-entry and display-on
             startInterrupt(POWER_BUTTON_IDX);
@@ -232,6 +284,8 @@ IOReturn SurfaceButtonDriver::unregisterInterrupt(int source) {
 }
 
 void SurfaceButtonDriver::startInterrupt(int source) {
+    if (source >= BTN_CNT || !interrupt_source[source] || terminating || shutdown)
+        return;
     if (is_interrupt_started[source])
         return;
 
@@ -240,6 +294,8 @@ void SurfaceButtonDriver::startInterrupt(int source) {
 }
 
 void SurfaceButtonDriver::stopInterrupt(int source) {
+    if (source >= BTN_CNT || !interrupt_source[source])
+        return;
     if (!is_interrupt_started[source])
         return;
 
@@ -248,22 +304,31 @@ void SurfaceButtonDriver::stopInterrupt(int source) {
 }
 
 void SurfaceButtonDriver::releaseResources() {
+    disableEvents();
     if (interrupt_source[POWER_BUTTON_IDX]) {
         stopInterrupt(POWER_BUTTON_IDX);
-        work_loop->removeEventSource(interrupt_source[POWER_BUTTON_IDX]);
+        if (work_loop)
+            work_loop->removeEventSource(interrupt_source[POWER_BUTTON_IDX]);
         OSSafeReleaseNULL(interrupt_source[POWER_BUTTON_IDX]);
     }
     if (interrupt_source[VOLUME_UP_BUTTON_IDX]) {
         stopInterrupt(VOLUME_UP_BUTTON_IDX);
-        work_loop->removeEventSource(interrupt_source[VOLUME_UP_BUTTON_IDX]);
+        if (work_loop)
+            work_loop->removeEventSource(interrupt_source[VOLUME_UP_BUTTON_IDX]);
         OSSafeReleaseNULL(interrupt_source[VOLUME_UP_BUTTON_IDX]);
     }
     if (interrupt_source[VOLUME_DOWN_BUTTON_IDX]) {
         stopInterrupt(VOLUME_DOWN_BUTTON_IDX);
-        work_loop->removeEventSource(interrupt_source[VOLUME_DOWN_BUTTON_IDX]);
+        if (work_loop)
+            work_loop->removeEventSource(interrupt_source[VOLUME_DOWN_BUTTON_IDX]);
         OSSafeReleaseNULL(interrupt_source[VOLUME_DOWN_BUTTON_IDX]);
     }
     OSSafeReleaseNULL(work_loop);
-    
+
+    if (button_device) {
+        button_device->setEventsEnabled(false);
+        button_device->stop(this);
+        button_device->detach(this);
+    }
     OSSafeReleaseNULL(button_device);
 }

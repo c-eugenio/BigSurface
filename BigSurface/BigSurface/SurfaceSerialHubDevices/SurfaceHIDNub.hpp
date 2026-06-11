@@ -9,6 +9,7 @@
 #ifndef SurfaceHIDNub_hpp
 #define SurfaceHIDNub_hpp
 
+#include <IOKit/IOMessage.h>
 #include "../SurfaceSerialHub/SurfaceSerialHubDriver.hpp"
 
 enum SurfaceHIDDescriptorEntryType : UInt8 {
@@ -67,6 +68,10 @@ public:
     bool start(IOService* provider) override;
     
     void stop(IOService* provider) override;
+
+    bool willTerminate(IOService *provider, IOOptionBits options) override;
+
+    IOReturn message(UInt32 type, IOService *provider, void *argument) override;
     
     IOReturn setPowerState(unsigned long whichState, IOService *device) override;
     
@@ -92,6 +97,14 @@ private:
     EventHandler            handler {nullptr};
 
     bool    legacy {true};
+    bool    started {false};
+    bool    terminating {false};
+    bool    shutdown {false};
+    bool    events_enabled {false};
+
+    bool canDispatchEvents() const;
+
+    void disableEvents();
 
     IOReturn getDescriptorData(SurfaceHIDDeviceType device, SurfaceHIDDescriptorEntryType entry, UInt8 *buffer, UInt16 buffer_len);
     

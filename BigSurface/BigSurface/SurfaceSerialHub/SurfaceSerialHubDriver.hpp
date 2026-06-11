@@ -9,6 +9,7 @@
 #ifndef SurfaceSerialHubDriver_hpp
 #define SurfaceSerialHubDriver_hpp
 
+#include <IOKit/IOMessage.h>
 #include <IOKit/acpi/IOACPIPlatformDevice.h>
 
 #include "../../../Dependencies/VoodooGPIO/VoodooGPIO/VoodooGPIO.hpp"
@@ -66,6 +67,10 @@ public:
     bool start(IOService* provider) override;
 
     void stop(IOService* provider) override;
+
+    bool willTerminate(IOService *provider, IOOptionBits options) override;
+
+    IOReturn message(UInt32 type, IOService *provider, void *argument) override;
     
     void free() override;
     
@@ -148,6 +153,10 @@ private:
     SurfaceHIDNub*          hid_nub {nullptr};
     
     bool            awake {true};
+    bool            started {false};
+    bool            terminating {false};
+    bool            shutdown {false};
+    bool            events_enabled {false};
     RingBuffer      ring_buffer[SSH_RING_BUFFER_SIZE];
     int             current {0};
     int             last {SSH_RING_BUFFER_SIZE-1};
@@ -199,6 +208,12 @@ private:
     VoodooGPIO* getGPIOController();
     
     IOReturn flushCacheGated();
+    
+    bool canProcessInput() const;
+
+    bool canDispatchEvents() const;
+
+    void disableEvents();
     
     void releaseResources();
 };

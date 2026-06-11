@@ -32,12 +32,19 @@ void SurfaceHIDNub::detach(IOService* provider) {
 bool SurfaceHIDNub::start(IOService *provider) {
     if (!super::start(provider))
         return false;
+
+    started = true;
+    terminating = false;
+    shutdown = false;
+    events_enabled = true;
     
     SurfaceHIDDescriptor desc;
     if (getHIDDescriptor(SurfaceLegacyKeyboardDevice, &desc) != kIOReturnSuccess) {
         legacy = false;
-        if (getHIDDescriptor(SurfaceKeyboardDevice, &desc) != kIOReturnSuccess)
+        if (getHIDDescriptor(SurfaceKeyboardDevice, &desc) != kIOReturnSuccess) {
+            disableEvents();
             return false;
+        }
     }
     LOG("HID version %d", !legacy+1);
     setProperty(SURFACE_LEGACY_HID_STRING, legacy);
@@ -51,8 +58,39 @@ bool SurfaceHIDNub::start(IOService *provider) {
 }
 
 void SurfaceHIDNub::stop(IOService *provider) {
+    terminating = true;
+    disableEvents();
     unregisterHIDEvent(target);
+    started = false;
     super::stop(provider);
+}
+
+bool SurfaceHIDNub::willTerminate(IOService *provider, IOOptionBits options) {
+    terminating = true;
+    disableEvents();
+    return super::willTerminate(provider, options);
+}
+
+IOReturn SurfaceHIDNub::message(UInt32 type, IOService *provider, void *argument) {
+    switch (type) {
+        case kIOMessageSystemWillPowerOff:
+        case kIOMessageSystemWillRestart:
+        case kIOMessageSystemWillShutdown:
+            shutdown = true;
+            disableEvents();
+            break;
+        default:
+            break;
+    }
+    return super::message(type, provider, argument);
+}
+
+bool SurfaceHIDNub::canDispatchEvents() const {
+    return started && !terminating && !shutdown && events_enabled;
+}
+
+void SurfaceHIDNub::disableEvents() {
+    events_enabled = false;
 }
 
 IOReturn SurfaceHIDNub::setPowerState(unsigned long whichState, IOService *device) {
@@ -64,6 +102,8 @@ IOReturn SurfaceHIDNub::setPowerState(unsigned long whichState, IOService *devic
 IOReturn SurfaceHIDNub::registerHIDEvent(OSObject* owner, EventHandler _handler) {
     if (!owner || !_handler)
         return kIOReturnError;
+    if (!ssh || terminating || shutdown)
+        return kIOReturnOffline;
     if (target) {
         LOG("HID event already registered for a handler!");
         return kIOReturnNoResources;
@@ -89,19 +129,25 @@ void SurfaceHIDNub::unregisterHIDEvent(OSObject* owner) {
     if (!target)
         return;
     if (target == owner) {
-        if (legacy)
-            ssh->unregisterEvent(this, SurfaceSerialEventHostManagedV1, SSH_TC_KBD, SurfaceLegacyKeyboardDevice);
-        else {
-            ssh->unregisterEvent(this, SurfaceSerialEventHostManagedV2, SSH_TC_HID, SurfaceKeyboardDevice);
-            ssh->unregisterEvent(this, SurfaceSerialEventHostManagedV2, SSH_TC_HID, SurfaceTouchpadDevice);
-        }
         target = nullptr;
         handler = nullptr;
+        events_enabled = false;
+        if (ssh) {
+            if (legacy)
+                ssh->unregisterEvent(this, SurfaceSerialEventHostManagedV1, SSH_TC_KBD, SurfaceLegacyKeyboardDevice);
+            else {
+                ssh->unregisterEvent(this, SurfaceSerialEventHostManagedV2, SSH_TC_HID, SurfaceKeyboardDevice);
+                ssh->unregisterEvent(this, SurfaceSerialEventHostManagedV2, SSH_TC_HID, SurfaceTouchpadDevice);
+            }
+        }
     } else
         LOG("HID event not registered for this handler!");
 }
 
 void SurfaceHIDNub::eventReceived(UInt8 tc, UInt8 tid, UInt8 iid, UInt8 cid, UInt8 *data_buffer, UInt16 length) {
+    if (!canDispatchEvents() || !handler || !target)
+        return;
+
     SurfaceHIDDeviceType device;
     if (legacy) {
         if ((cid != SSH_EVENT_CID_KBD_INPUT_GENERIC && cid != SSH_EVENT_CID_KBD_INPUT_HOTKEYS)
@@ -126,7 +172,7 @@ void SurfaceHIDNub::eventReceived(UInt8 tc, UInt8 tid, UInt8 iid, UInt8 cid, UIn
         }
     }
     
-    if (handler)
+    if (canDispatchEvents() && handler && target)
         handler(target, this, device, data_buffer, length);
     return;
     
@@ -135,14 +181,20 @@ error:
 }
 
 IOReturn SurfaceHIDNub::getHIDDescriptor(SurfaceHIDDeviceType device, SurfaceHIDDescriptor *desc) {
+    if (!ssh)
+        return kIOReturnOffline;
     return getDescriptorData(device, SurfaceHIDDescriptorEntry, reinterpret_cast<UInt8 *>(desc), sizeof(SurfaceHIDDescriptor));
 }
 
 IOReturn SurfaceHIDNub::getHIDAttributes(SurfaceHIDDeviceType device, SurfaceHIDAttributes *attr) {
+    if (!ssh)
+        return kIOReturnOffline;
     return getDescriptorData(device, SurfaceHIDAttributesEntry, reinterpret_cast<UInt8 *>(attr), sizeof(SurfaceHIDAttributes));
 }
 
 IOReturn SurfaceHIDNub::getReportDescriptor(SurfaceHIDDeviceType device, UInt8 *buffer, UInt16 len) {
+    if (!ssh)
+        return kIOReturnOffline;
     return getDescriptorData(device, SurfaceReportDescriptorEntry, buffer, len);
 }
 
@@ -210,6 +262,8 @@ IOReturn SurfaceHIDNub::getData(SurfaceHIDDeviceType device, SurfaceHIDDescripto
 }
 
 IOReturn SurfaceHIDNub::getHIDRawReport(SurfaceHIDDeviceType device, UInt8 report_id, UInt8 *buffer, UInt16 len) {
+    if (!ssh || terminating || shutdown)
+        return kIOReturnOffline;
     if (legacy) {
         UInt8 payload = 0;
         UInt8 report[SURFACE_LEGACY_FEAT_REPORT_SIZE];
@@ -230,6 +284,8 @@ IOReturn SurfaceHIDNub::getHIDRawReport(SurfaceHIDDeviceType device, UInt8 repor
 }
 
 void SurfaceHIDNub::setHIDRawReport(SurfaceHIDDeviceType device, UInt8 report_id, bool feature, UInt8 *buffer, UInt16 len) {
+    if (!ssh || terminating || shutdown)
+        return;
     if (!legacy) {
         UInt8 cid = feature ? SSH_CID_HID_SET_FEAT_REPORT : SSH_CID_HID_OUT_REPORT;
         buffer[0] = report_id;

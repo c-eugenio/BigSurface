@@ -26,8 +26,15 @@ const UInt8 virt_reportDescriptor[] = {
     0xc0,             // End Collection
 };
 
+void SurfaceButtonDevice::setEventsEnabled(bool enabled) {
+    events_enabled = enabled && started && !terminating && !shutdown;
+}
+
 IOReturn SurfaceButtonDevice::simulateKeyboardEvent(UInt32 usagePage, UInt32 usage, bool status) {
     IOReturn result = kIOReturnError;
+
+    if (!started || terminating || shutdown || !events_enabled)
+        return kIOReturnOffline;
     
     if (usagePage == kHIDPage_Consumer) {
         if (status)
@@ -50,10 +57,42 @@ bool SurfaceButtonDevice::handleStart(IOService *provider) {
         return false;
     }
 
+    started = true;
+    terminating = false;
+    shutdown = false;
+    events_enabled = true;
+
     setProperty("Built-In", kOSBooleanTrue);
     setProperty("HIDDefaultBehavior", kOSBooleanTrue);
 
     return true;
+}
+
+void SurfaceButtonDevice::handleStop(IOService *provider) {
+    terminating = true;
+    events_enabled = false;
+    started = false;
+    super::handleStop(provider);
+}
+
+bool SurfaceButtonDevice::willTerminate(IOService *provider, IOOptionBits options) {
+    terminating = true;
+    events_enabled = false;
+    return super::willTerminate(provider, options);
+}
+
+IOReturn SurfaceButtonDevice::message(UInt32 type, IOService *provider, void *argument) {
+    switch (type) {
+        case kIOMessageSystemWillPowerOff:
+        case kIOMessageSystemWillRestart:
+        case kIOMessageSystemWillShutdown:
+            shutdown = true;
+            events_enabled = false;
+            break;
+        default:
+            break;
+    }
+    return super::message(type, provider, argument);
 }
 
 IOReturn SurfaceButtonDevice::newReportDescriptor(IOMemoryDescriptor **descriptor) const {
