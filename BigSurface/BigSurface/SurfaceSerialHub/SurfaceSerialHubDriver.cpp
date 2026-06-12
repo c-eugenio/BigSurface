@@ -770,8 +770,11 @@ IOReturn SurfaceSerialHubDriver::setPowerState(unsigned long whichState, IOServi
 
 void SurfaceSerialHubDriver::releaseResources() {
     disableEvents();
-    if (command_gate)
+    if (command_gate) {
         command_gate->runAction(OSMemberFunctionCast(IOCommandGate::Action, this, &SurfaceSerialHubDriver::cancelPendingRequestsGated));
+        for (int i = 0; i < 20 && !queue_empty(&waiting_list); i++)
+            IOSleep(10);
+    }
     if (battery_nub) {
         battery_nub->stop(this);
         battery_nub->detach(this);
