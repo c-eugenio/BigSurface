@@ -30,6 +30,10 @@ void SurfaceButtonDevice::setEventsEnabled(bool enabled) {
     events_enabled = enabled && started && !terminating && !shutdown;
 }
 
+bool SurfaceButtonDevice::hasOpenClient() const {
+    return client_open;
+}
+
 IOReturn SurfaceButtonDevice::simulateKeyboardEvent(UInt32 usagePage, UInt32 usage, bool status) {
     IOReturn result = kIOReturnError;
 
@@ -66,6 +70,20 @@ bool SurfaceButtonDevice::handleStart(IOService *provider) {
     setProperty("HIDDefaultBehavior", kOSBooleanTrue);
 
     return true;
+}
+
+bool SurfaceButtonDevice::handleOpen(IOService *client, IOOptionBits options, void *argument) {
+    if (!super::handleOpen(client, options, argument))
+        return false;
+
+    client_open = true;
+    return true;
+}
+
+void SurfaceButtonDevice::handleClose(IOService *client, IOOptionBits options) {
+    client_open = false;
+    events_enabled = false;
+    super::handleClose(client, options);
 }
 
 void SurfaceButtonDevice::handleStop(IOService *provider) {

@@ -243,7 +243,7 @@ IOReturn SurfaceButtonDriver::setPowerState(unsigned long whichState, IOService 
     if (whatDevice != this)
         return kIOReturnInvalid;
     if (whichState == 0) {
-        if (terminating || shutdown) {
+        if (terminating || shutdown || (button_device && !button_device->hasOpenClient())) {
             awake = false;
             return kIOPMAckImplied;
         }

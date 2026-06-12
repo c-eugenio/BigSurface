@@ -18,13 +18,20 @@ private:
     bool terminating {false};
     bool shutdown {false};
     bool events_enabled {false};
+    bool client_open {false};
 
 public:
     void setEventsEnabled(bool enabled);
 
+    bool hasOpenClient() const;
+
     IOReturn simulateKeyboardEvent(UInt32 usagePage, UInt32 usage, bool status);
     
     bool handleStart(IOService *provider) override;
+
+    bool handleOpen(IOService *client, IOOptionBits options, void *argument) override;
+
+    void handleClose(IOService *client, IOOptionBits options) override;
 
     void handleStop(IOService *provider) override;
 
