@@ -58,7 +58,7 @@ public:
 
     IOReturn registerEvent(SurfaceSerialHubClient *client, SurfaceSerialEventRegistryType type, UInt8 tc, UInt8 iid);
     
-    void unregisterEvent(SurfaceSerialHubClient *client, SurfaceSerialEventRegistryType type, UInt8 tc, UInt8 iid);
+    void unregisterEvent(SurfaceSerialHubClient *client, SurfaceSerialEventRegistryType type, UInt8 tc, UInt8 iid, bool notifyDevice = true);
     
     bool init(OSDictionary* properties) override;
     
@@ -110,6 +110,8 @@ private:
     struct WaitingRequest {
         queue_entry entry;
         bool    waiting;
+        bool    queued;
+        bool    cancelled;
         UInt16  req_id;
         UInt8*  data;
         UInt16  data_len;
@@ -208,6 +210,8 @@ private:
     VoodooGPIO* getGPIOController();
     
     IOReturn flushCacheGated();
+
+    IOReturn cancelPendingRequestsGated();
     
     bool canProcessInput() const;
 

@@ -40,7 +40,8 @@ bool SurfaceBatteryNub::start(IOService *provider) {
 }
 
 void SurfaceBatteryNub::stop(IOService *provider) {
-    unregisterBatteryEvent(target);
+    unregisterBatteryEvent(target, false);
+    PMstop();
     super::stop(provider);
 }
 
@@ -67,10 +68,10 @@ IOReturn SurfaceBatteryNub::registerBatteryEvent(OSObject* owner, EventHandler _
     return kIOReturnSuccess;
 }
 
-void SurfaceBatteryNub::unregisterBatteryEvent(OSObject* owner) {
+void SurfaceBatteryNub::unregisterBatteryEvent(OSObject* owner, bool notifyDevice) {
     if (target) {
         if (target == owner) {
-            ssh->unregisterEvent(this, SurfaceSerialEventHostManagedV1, SSH_TC_BAT, 0x00);
+            ssh->unregisterEvent(this, SurfaceSerialEventHostManagedV1, SSH_TC_BAT, 0x00, notifyDevice);
             target = nullptr;
             handler = nullptr;
         } else

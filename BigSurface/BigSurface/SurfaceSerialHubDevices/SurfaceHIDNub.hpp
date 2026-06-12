@@ -77,7 +77,7 @@ public:
     
     IOReturn registerHIDEvent(OSObject* owner, EventHandler _handler);
     
-    void unregisterHIDEvent(OSObject* owner);
+    void unregisterHIDEvent(OSObject* owner, bool notifyDevice = true);
     
     void eventReceived(UInt8 tc, UInt8 tid, UInt8 iid, UInt8 cid, UInt8 *data_buffer, UInt16 length) override;
     

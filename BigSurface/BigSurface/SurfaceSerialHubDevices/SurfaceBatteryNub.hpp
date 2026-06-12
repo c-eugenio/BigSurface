@@ -38,7 +38,7 @@ public:
     
     IOReturn registerBatteryEvent(OSObject* owner, EventHandler _handler);
     
-    void unregisterBatteryEvent(OSObject* owner);
+    void unregisterBatteryEvent(OSObject* owner, bool notifyDevice = true);
     
     void eventReceived(UInt8 tc, UInt8 tid, UInt8 iid, UInt8 cid, UInt8 *data_buffer, UInt16 length) override;
     

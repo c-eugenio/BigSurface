@@ -60,7 +60,8 @@ bool SurfaceHIDNub::start(IOService *provider) {
 void SurfaceHIDNub::stop(IOService *provider) {
     terminating = true;
     disableEvents();
-    unregisterHIDEvent(target);
+    unregisterHIDEvent(target, false);
+    PMstop();
     started = false;
     super::stop(provider);
 }
@@ -124,7 +125,7 @@ IOReturn SurfaceHIDNub::registerHIDEvent(OSObject* owner, EventHandler _handler)
     return kIOReturnSuccess;
 }
 
-void SurfaceHIDNub::unregisterHIDEvent(OSObject* owner) {
+void SurfaceHIDNub::unregisterHIDEvent(OSObject* owner, bool notifyDevice) {
     if (!target)
         return;
     if (target == owner) {
@@ -133,10 +134,10 @@ void SurfaceHIDNub::unregisterHIDEvent(OSObject* owner) {
         events_enabled = false;
         if (ssh) {
             if (legacy)
-                ssh->unregisterEvent(this, SurfaceSerialEventHostManagedV1, SSH_TC_KBD, SurfaceLegacyKeyboardDevice);
+                ssh->unregisterEvent(this, SurfaceSerialEventHostManagedV1, SSH_TC_KBD, SurfaceLegacyKeyboardDevice, notifyDevice);
             else {
-                ssh->unregisterEvent(this, SurfaceSerialEventHostManagedV2, SSH_TC_HID, SurfaceKeyboardDevice);
-                ssh->unregisterEvent(this, SurfaceSerialEventHostManagedV2, SSH_TC_HID, SurfaceTouchpadDevice);
+                ssh->unregisterEvent(this, SurfaceSerialEventHostManagedV2, SSH_TC_HID, SurfaceKeyboardDevice, notifyDevice);
+                ssh->unregisterEvent(this, SurfaceSerialEventHostManagedV2, SSH_TC_HID, SurfaceTouchpadDevice, notifyDevice);
             }
         }
     } else

@@ -228,8 +228,9 @@ IOReturn SurfaceSerialHubDriver::processMessage() {
                             req->data_len = rx_data_len;
                             memcpy(req->data, rx_data, rx_data_len);
                         }
-                        command_gate->commandWakeup(&req->waiting);
                         remqueue(&req->entry);
+                        req->queued = false;
+                        command_gate->commandWakeup(&req->waiting);
                         break;
                     }
                 }
@@ -392,6 +393,9 @@ void SurfaceSerialHubDriver::commandTimeout(IOTimerEventSource* timer) {
 }
 
 IOReturn SurfaceSerialHubDriver::getResponse(UInt8 tc, UInt8 tid, UInt8 iid, UInt8 cid, UInt8 *payload, UInt16 payload_len, bool seq, UInt8 *buffer, UInt16 buffer_len) {
+    if (terminating || shutdown)
+        return kIOReturnOffline;
+
     UInt16 req_id = sendCommand(tc, tid, iid, cid, payload, payload_len, seq);
     
     if (req_id != 0 && command_gate)
@@ -405,6 +409,8 @@ IOReturn SurfaceSerialHubDriver::waitResponse(UInt16 *req_id, UInt8 *buffer, UIn
     
     WaitingRequest *w = new WaitingRequest;
     w->waiting = false;
+    w->queued = true;
+    w->cancelled = false;
     w->req_id = *req_id;
     w->data = nullptr;
     w->data_len = 0;
@@ -414,11 +420,17 @@ IOReturn SurfaceSerialHubDriver::waitResponse(UInt16 *req_id, UInt8 *buffer, UIn
     clock_absolutetime_interval_to_deadline(abstime, &deadline);
     sleep = command_gate->commandSleep(&w->waiting, deadline, THREAD_INTERRUPTIBLE);
     
-    if (sleep == THREAD_TIMED_OUT) {
-        LOG("Timeout waiting for response");
-        remqueue(&w->entry);
+    if (sleep == THREAD_TIMED_OUT || w->cancelled || terminating || shutdown) {
+        if (sleep == THREAD_TIMED_OUT)
+            LOG("Timeout waiting for response");
+        if (w->queued) {
+            remqueue(&w->entry);
+            w->queued = false;
+        }
+        if (w->data_len)
+            delete[] w->data;
         delete w;
-        return kIOReturnTimeout;
+        return sleep == THREAD_TIMED_OUT ? kIOReturnTimeout : kIOReturnOffline;
     }
     if (*buffer_len != w->data_len)
         DBG_LOG("Warning, given buffer_len(%d) and received data_len(%d) mismatched!", *buffer_len, w->data_len);
@@ -471,7 +483,7 @@ IOReturn SurfaceSerialHubDriver::registerEvent(SurfaceSerialHubClient *client, S
     }
 }
 
-void SurfaceSerialHubDriver::unregisterEvent(SurfaceSerialHubClient *client, SurfaceSerialEventRegistryType type, UInt8 tc, UInt8 iid) {
+void SurfaceSerialHubDriver::unregisterEvent(SurfaceSerialHubClient *client, SurfaceSerialEventRegistryType type, UInt8 tc, UInt8 iid, bool notifyDevice) {
     if (type >= SurfaceSerialEventTypeCount)
         return;
     
@@ -479,14 +491,14 @@ void SurfaceSerialHubDriver::unregisterEvent(SurfaceSerialHubClient *client, Sur
         EventHandler *h;
         qe_foreach_element_safe(h, &event_handler_lists[tc], entry) {
             if (h->client == client && (h->target_iid == iid || iid == 0)) {
-                if (tc != 0 && !terminating && !shutdown)
+                if (notifyDevice && tc != 0 && !terminating && !shutdown)
                     sendEventCommand(type, tc, iid, false);
                 remqueue(&h->entry);
                 delete h;
                 break;
             }
         }
-    } else if (tc != 0 && !terminating && !shutdown) {
+    } else if (notifyDevice && tc != 0 && !terminating && !shutdown) {
         sendEventCommand(type, tc, iid, false);
     }
 }
@@ -644,10 +656,12 @@ exit:
 
 void SurfaceSerialHubDriver::stop(IOService *provider) {
     UInt8 ret;
+    if (!shutdown && awake) {
+        getResponse(SSH_TC_SAM, SSH_TID_PRIMARY, 0, SSH_CID_SAM_DISPLAY_OFF, nullptr, 0, true, &ret, 1);
+        getResponse(SSH_TC_SAM, SSH_TID_PRIMARY, 0, SSH_CID_SAM_D0_EXIT, nullptr, 0, true, &ret, 1);
+    }
     terminating = true;
     disableEvents();
-    getResponse(SSH_TC_SAM, SSH_TID_PRIMARY, 0, SSH_CID_SAM_DISPLAY_OFF, nullptr, 0, true, &ret, 1);
-    getResponse(SSH_TC_SAM, SSH_TID_PRIMARY, 0, SSH_CID_SAM_D0_EXIT, nullptr, 0, true, &ret, 1);
     if (uart_controller)
         uart_controller->requestDisconnect(this);
     
@@ -710,16 +724,27 @@ IOReturn SurfaceSerialHubDriver::flushCacheGated() {
     return kIOReturnSuccess;
 }
 
+IOReturn SurfaceSerialHubDriver::cancelPendingRequestsGated() {
+    WaitingRequest *req;
+    qe_foreach_element(req, &waiting_list, entry) {
+        req->cancelled = true;
+        command_gate->commandWakeup(&req->waiting);
+    }
+    return kIOReturnSuccess;
+}
+
 IOReturn SurfaceSerialHubDriver::setPowerState(unsigned long whichState, IOService *whatDevice) {
     if (whatDevice != this)
         return kIOReturnInvalid;
     if (whichState == 0) {
         if (awake) {
             UInt8 ret;
-            if (getResponse(SSH_TC_SAM, SSH_TID_PRIMARY, 0, SSH_CID_SAM_DISPLAY_OFF, nullptr, 0, true, &ret, 1) != kIOReturnSuccess || ret != 0)
-                DBG_LOG("Unexpected response from display-off notification");
-            if (getResponse(SSH_TC_SAM, SSH_TID_PRIMARY, 0, SSH_CID_SAM_D0_EXIT, nullptr, 0, true, &ret, 1) != kIOReturnSuccess || ret != 0)
-                DBG_LOG("Unexpected response from d0-exit notification");
+            if (!shutdown && !terminating) {
+                if (getResponse(SSH_TC_SAM, SSH_TID_PRIMARY, 0, SSH_CID_SAM_DISPLAY_OFF, nullptr, 0, true, &ret, 1) != kIOReturnSuccess || ret != 0)
+                    DBG_LOG("Unexpected response from display-off notification");
+                if (getResponse(SSH_TC_SAM, SSH_TID_PRIMARY, 0, SSH_CID_SAM_D0_EXIT, nullptr, 0, true, &ret, 1) != kIOReturnSuccess || ret != 0)
+                    DBG_LOG("Unexpected response from d0-exit notification");
+            }
             if (uart_interrupt)
                 uart_interrupt->disable();
             awake = false;
@@ -745,6 +770,8 @@ IOReturn SurfaceSerialHubDriver::setPowerState(unsigned long whichState, IOServi
 
 void SurfaceSerialHubDriver::releaseResources() {
     disableEvents();
+    if (command_gate)
+        command_gate->runAction(OSMemberFunctionCast(IOCommandGate::Action, this, &SurfaceSerialHubDriver::cancelPendingRequestsGated));
     if (battery_nub) {
         battery_nub->stop(this);
         battery_nub->detach(this);
@@ -762,13 +789,8 @@ void SurfaceSerialHubDriver::releaseResources() {
             delete h;
         }
     }
-    WaitingRequest *req;
-    qe_foreach_element_safe(req, &waiting_list, entry) {
-        remqueue(&req->entry);
-        if (req->data_len)
-            delete[] req->data;
-        delete req;
-    }
+    if (!queue_empty(&waiting_list))
+        DBG_LOG("There are still waiting requests!");
     PendingCommand *cmd;
     qe_foreach_element_safe(cmd, &pending_list, entry) {
         remqueue(&cmd->entry);

@@ -304,6 +304,13 @@ void SurfaceButtonDriver::stopInterrupt(int source) {
 
 void SurfaceButtonDriver::releaseResources() {
     disableEvents();
+    if (button_device) {
+        button_device->setEventsEnabled(false);
+        button_device->stop(this);
+        button_device->detach(this);
+    }
+    OSSafeReleaseNULL(button_device);
+
     if (interrupt_source[POWER_BUTTON_IDX]) {
         stopInterrupt(POWER_BUTTON_IDX);
         if (work_loop)
@@ -323,11 +330,4 @@ void SurfaceButtonDriver::releaseResources() {
         OSSafeReleaseNULL(interrupt_source[VOLUME_DOWN_BUTTON_IDX]);
     }
     OSSafeReleaseNULL(work_loop);
-
-    if (button_device) {
-        button_device->setEventsEnabled(false);
-        button_device->stop(this);
-        button_device->detach(this);
-    }
-    OSSafeReleaseNULL(button_device);
 }
