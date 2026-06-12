@@ -231,7 +231,6 @@ IOReturn SurfaceButtonDriver::message(UInt32 type, IOService *provider, void *ar
         case kIOMessageSystemWillRestart:
             shutdown = true;
             disableEvents();
-            terminateButtonDevice();
             break;
         default:
             break;
