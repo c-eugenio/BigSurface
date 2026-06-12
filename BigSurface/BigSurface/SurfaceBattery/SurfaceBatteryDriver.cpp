@@ -338,10 +338,9 @@ bool SurfaceBatteryDriver::vsmcNotificationHandler(void *sensors, void *refCon, 
 }
 
 void SurfaceBatteryDriver::stop(IOService *provider) {
-//    PMstop();
-//    releaseResources();
-//    super::stop(provider);
-    PANIC("SurfaceBatteryDriver", "called stop!!!");
+    PMstop();
+    releaseResources();
+    super::stop(provider);
 }
 
 void SurfaceBatteryDriver::releaseResources() {
