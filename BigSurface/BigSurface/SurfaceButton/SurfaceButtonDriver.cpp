@@ -127,7 +127,7 @@ void SurfaceButtonDriver::response(int btn_idx, bool status) {
 }
 
 bool SurfaceButtonDriver::canDispatchEvents() const {
-    return started && !terminating && !shutdown && events_enabled;
+    return awake && started && !terminating && !shutdown && events_enabled;
 }
 
 void SurfaceButtonDriver::disableEvents() {
