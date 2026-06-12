@@ -243,6 +243,10 @@ IOReturn SurfaceButtonDriver::setPowerState(unsigned long whichState, IOService 
     if (whatDevice != this)
         return kIOReturnInvalid;
     if (whichState == 0) {
+        if (terminating || shutdown) {
+            awake = false;
+            return kIOPMAckImplied;
+        }
         if (awake) {
             stopInterrupt(POWER_BUTTON_IDX);
             stopInterrupt(VOLUME_UP_BUTTON_IDX);
@@ -309,7 +313,7 @@ bool SurfaceButtonDriver::terminateButtonDevice() {
         return button_device_terminated;
 
     button_device->setEventsEnabled(false);
-    button_device_terminated = button_device->terminate(kIOServiceSynchronous);
+    button_device_terminated = button_device->terminate();
     return button_device_terminated;
 }
 
