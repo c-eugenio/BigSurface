@@ -172,6 +172,7 @@ bool SurfaceButtonDriver::start(IOService *provider) {
     terminating = false;
     shutdown = false;
     events_enabled = false;
+    button_device_terminated = false;
 
     work_loop = IOWorkLoop::workLoop();
     if (!work_loop) {
@@ -230,6 +231,7 @@ IOReturn SurfaceButtonDriver::message(UInt32 type, IOService *provider, void *ar
         case kIOMessageSystemWillRestart:
             shutdown = true;
             disableEvents();
+            terminateButtonDevice();
             break;
         default:
             break;
@@ -302,12 +304,24 @@ void SurfaceButtonDriver::stopInterrupt(int source) {
     is_interrupt_started[source] = false;
 }
 
+bool SurfaceButtonDriver::terminateButtonDevice() {
+    if (!button_device || button_device_terminated)
+        return button_device_terminated;
+
+    button_device->setEventsEnabled(false);
+    button_device_terminated = button_device->terminate(kIOServiceSynchronous);
+    return button_device_terminated;
+}
+
 void SurfaceButtonDriver::releaseResources() {
     disableEvents();
     if (button_device) {
         button_device->setEventsEnabled(false);
-        button_device->stop(this);
-        button_device->detach(this);
+        if (!terminateButtonDevice()) {
+            button_device->stop(this);
+            button_device->detach(this);
+            button_device_terminated = true;
+        }
     }
     OSSafeReleaseNULL(button_device);
 

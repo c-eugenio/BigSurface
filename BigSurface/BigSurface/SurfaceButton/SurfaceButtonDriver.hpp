@@ -43,6 +43,7 @@ private:
     bool    terminating {false};
     bool    shutdown {false};
     bool    events_enabled {false};
+    bool    button_device_terminated {false};
     int     gpio_irq[BTN_CNT] = {0,0,0};
     UInt16  gpio_pin[BTN_CNT] = {0,0,0};
     bool    awake {false};    
@@ -52,6 +53,8 @@ private:
     void stopInterrupt(int source);
     
     void releaseResources();
+
+    bool terminateButtonDevice();
     
     IOReturn getDeviceResources();
     
