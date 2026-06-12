@@ -65,6 +65,7 @@ bool SurfaceButtonDevice::handleStart(IOService *provider) {
     terminating = false;
     shutdown = false;
     events_enabled = true;
+    client_open = false;
 
     setProperty("Built-In", kOSBooleanTrue);
     setProperty("HIDDefaultBehavior", kOSBooleanTrue);
@@ -77,6 +78,7 @@ bool SurfaceButtonDevice::handleOpen(IOService *client, IOOptionBits options, vo
         return false;
 
     client_open = true;
+    setEventsEnabled(true);
     return true;
 }
 
@@ -89,6 +91,7 @@ void SurfaceButtonDevice::handleClose(IOService *client, IOOptionBits options) {
 void SurfaceButtonDevice::handleStop(IOService *provider) {
     terminating = true;
     events_enabled = false;
+    client_open = false;
     started = false;
     super::handleStop(provider);
 }
@@ -96,6 +99,7 @@ void SurfaceButtonDevice::handleStop(IOService *provider) {
 bool SurfaceButtonDevice::willTerminate(IOService *provider, IOOptionBits options) {
     terminating = true;
     events_enabled = false;
+    client_open = false;
     return super::willTerminate(provider, options);
 }
 
