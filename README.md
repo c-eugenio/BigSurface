@@ -77,5 +77,54 @@ Replace: 00020900 B2000000 F0F1
 
 Thanks to @he1833
 
+## Debugging
+
+BigSurface already uses kext logging through the macros in `BigSurface/BigSurface/helpers.hpp`:
+
+- `LOG(...)` always writes through `IOLog`.
+- `DBG_LOG(...)` only writes when the kext is built with `DEBUG=1`, which is enabled by the Xcode Debug configuration.
+
+When debugging an issue, install a Debug build when possible so `DBG_LOG(...)` messages are included. Release builds hide these debug-only messages.
+
+To watch live kernel logs while reproducing the problem:
+
+```sh
+sudo log stream --style syslog --level debug --predicate 'process == "kernel" AND (eventMessage CONTAINS "BigSurface" OR eventMessage CONTAINS "Surface")'
+```
+
+To save logs from the current boot after reproducing the problem:
+
+```sh
+sudo log show --last boot --style syslog --predicate 'process == "kernel" AND (eventMessage CONTAINS "BigSurface" OR eventMessage CONTAINS "Surface")' > ~/Desktop/bigsurface.log
+```
+
+Confirm that the kext is loaded:
+
+```sh
+kmutil showloaded | grep -i BigSurface
+```
+
+Confirm that the expected devices are matched in IORegistry:
+
+```sh
+ioreg -l -w0 | grep -i -E 'BigSurface|SurfaceSerialHub|SurfaceBattery|SurfaceButton'
+```
+
+If the machine panics or reboots, add these OpenCore boot arguments before reproducing the issue:
+
+```text
+-v keepsyms=1 debug=0x100
+```
+
+Use the affected subsystem to narrow the logs:
+
+- Keyboard or touchpad: `SurfaceSerialHub` and `SurfaceHIDNub`.
+- Battery: `SurfaceBattery`, `SurfaceBatteryNub`, and `SurfaceSMBusController`.
+- Buttons: `SurfaceButton`.
+- Ambient light sensor: `SurfaceAmbientLightSensor`.
+- Touch or stylus/IPTS: `SurfaceManagementEngine`.
+
+If the existing logs are not enough, add temporary `DBG_LOG(...)` calls around attach, probe, start, interrupt handlers, command send/receive paths, and error returns. Prefer logging return codes, target category, command ID, instance ID, sequence ID, buffer length, and event type.
+
 ## If you like my project, please consider to star this project, thanks!
 ### If you appreciate my effort and would like to pay me a coffee, here is my PayPal address: `ritchiexia@163.com`
